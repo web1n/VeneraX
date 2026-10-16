@@ -44,7 +44,7 @@ class _LocalComicsPageState extends State<LocalComicsPage>
     LocalComicStatus.downloaded => 1,
     LocalComicStatus.downloading => 2,
     LocalComicStatus.notDownloaded => 3,
-    null => 0,
+    LocalComicStatus.unknown || null => 0,
   };
 
   /// Builds the comic list for the current tab/keyword, merging active

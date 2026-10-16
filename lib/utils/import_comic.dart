@@ -479,7 +479,7 @@ class ImportComic {
       for (var folder in importedComics.keys) {
         for (var comic in importedComics[folder]!) {
           var id = LocalManager().findValidId(ComicType.local);
-          LocalManager().add(comic, id);
+          LocalManager().add(comic, id, true);
           importedCount++;
           if (folder != null) {
             LocalFavoritesManager().addComic(
