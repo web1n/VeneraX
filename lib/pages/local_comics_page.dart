@@ -5,6 +5,7 @@ import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/export_tasks.dart';
 import 'package:venera/foundation/local.dart';
+import 'package:venera/foundation/local_library_refresh_tasks.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/pages/comic_details_page/comic_page.dart';
 import 'package:venera/pages/webdav_migration_dialog.dart';
@@ -73,7 +74,7 @@ class _LocalComicsPageState extends State<LocalComicsPage>
       3 => LocalComicStatus.notDownloaded,
       _ => null,
     };
-    return tab == null ? all : all.where((c) => c.status == tab).toList();
+    return tab == null ? all : all.where((c) => c.cachedStatus == tab).toList();
   }
 
   void update() {
@@ -297,6 +298,11 @@ class _LocalComicsPageState extends State<LocalComicsPage>
       ),
       MenuButton(entries: [
           MenuEntry(
+            icon: Icons.refresh,
+            text: "Refresh Local Status".tl,
+            onClick: _refreshLocalStatus,
+          ),
+          MenuEntry(
             icon: Icons.file_download_outlined,
             text: "Import".tl,
             onClick: _openImport,
@@ -494,6 +500,10 @@ class _LocalComicsPageState extends State<LocalComicsPage>
   Widget _emptyLibrary(int index) {
     final searching = keyword.trim().isNotEmpty;
     final filtered = searching || index != 0;
+    final hasUnknown = !searching && index != 0 &&
+        LocalManager().getComics(sortType).any(
+          (comic) => comic.cachedStatus == LocalComicStatus.unknown,
+        );
     return SliverFillRemaining(
       hasScrollBody: false,
       child: Padding(
@@ -549,6 +559,19 @@ class _LocalComicsPageState extends State<LocalComicsPage>
                       }
                     : _openImport,
               ),
+              if (hasUnknown) ...[
+                const SizedBox(height: 16),
+                Text(
+                  'Some comics have not been checked yet. Refresh local status to update categories.'.tl,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: context.colorScheme.onSurfaceVariant),
+                ),
+                TextButton.icon(
+                  onPressed: _refreshLocalStatus,
+                  icon: const Icon(Icons.refresh),
+                  label: Text('Refresh Local Status'.tl),
+                ),
+              ],
             ],
           ),
         ),
@@ -561,6 +584,15 @@ class _LocalComicsPageState extends State<LocalComicsPage>
     context: context,
     builder: (context) => const ImportComicsWidget(),
   );
+
+  void _refreshLocalStatus() {
+    // The manager returns an existing task instead of starting a duplicate.
+    final task = LocalLibraryRefreshTaskManager.instance.start();
+    showDialog<void>(
+      context: context,
+      builder: (_) => _LocalLibraryRefreshDialog(task: task),
+    );
+  }
 
   void _showNotDownloadedDialog(LocalComic comic) {
     final hasSource = comic.comicType != ComicType.local &&
@@ -832,6 +864,77 @@ class _LocalComicsPageState extends State<LocalComicsPage>
         onClick: () => _startExportTask(comics, ExportFormat.epub),
       )
     ];
+  }
+}
+
+/// The manager owns the task; dismissing this view only detaches its listener.
+class _LocalLibraryRefreshDialog extends StatelessWidget {
+  const _LocalLibraryRefreshDialog({required this.task});
+
+  final LocalLibraryRefreshTask task;
+
+  @override
+  Widget build(BuildContext context) {
+    final manager = LocalLibraryRefreshTaskManager.instance;
+    return AnimatedBuilder(
+      animation: manager,
+      builder: (context, _) {
+        final status = switch (task.status) {
+          LocalLibraryRefreshStatus.running => 'Checking local files'.tl,
+          LocalLibraryRefreshStatus.completed => 'Completed'.tl,
+          LocalLibraryRefreshStatus.canceled => 'Canceled'.tl,
+          LocalLibraryRefreshStatus.failed => 'Failed'.tl,
+        };
+        return ContentDialog(
+          title: 'Refresh Local Status'.tl,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(status, style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 12),
+              LinearProgressIndicator(
+                value: task.isRunning && task.total == 0 ? null : task.progress,
+              ),
+              const SizedBox(height: 12),
+              Text('Checked @checked/@total'.tlParams({
+                'checked': task.checked,
+                'total': task.total,
+              })),
+              const SizedBox(height: 8),
+              Text('Downloaded: @count'.tlParams({'count': task.downloaded})),
+              Text('Missing: @count'.tlParams({'count': task.missing})),
+              Text('Failed: @count'.tlParams({'count': task.failed})),
+              if (task.isRunning && task.currentTitle != null) ...[
+                const SizedBox(height: 12),
+                Text(task.currentTitle!, maxLines: 2, overflow: TextOverflow.ellipsis),
+              ],
+              if (task.error != null) ...[
+                const SizedBox(height: 12),
+                Text(task.error!, style: TextStyle(color: context.colorScheme.error)),
+              ],
+            ],
+          ),
+          actions: task.isRunning
+              ? [
+                  Button.text(
+                    onPressed: () => manager.cancel(task.id),
+                    child: Text('Cancel'.tl),
+                  ),
+                  Button.filled(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text('Background'.tl),
+                  ),
+                ]
+              : [
+                  Button.filled(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text('OK'.tl),
+                  ),
+                ],
+        );
+      },
+    );
   }
 }
 
