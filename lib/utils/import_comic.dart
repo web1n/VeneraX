@@ -337,44 +337,65 @@ class ImportComic {
   }
 
   Future<bool> localDownloads() async {
-    var localDir = LocalManager().directory;
-    Map<String?, List<LocalComic>> imported = {null: []};
-    bool cancelled = false;
-    var controller = showLoadingDialog(App.rootContext, onCancel: () {
-      cancelled = true;
-    });
+    final manager = LocalManager();
+    final path = manager.path;
+    final generation = manager.availabilityGeneration;
+    final scan = LocalDownloadRecoveryScan();
+    var canceled = false;
+    bool shouldCancel() => canceled || !manager.isInitialized ||
+        manager.availabilityGeneration != generation;
+    final controller = showLoadingDialog(
+      App.rootContext,
+      barrierDismissible: false,
+      withProgress: true,
+      message: 'Restore local downloads'.tl,
+      onCancel: () {
+        canceled = true;
+        scan.cancel();
+      },
+    );
     try {
-      if (!await localDir.exists()) {
-        App.rootContext.showMessage(message: "Local path not found".tl);
-        controller.close();
+      if (!await manager.directory.exists()) {
+        App.rootContext.showMessage(message: 'Local path not found'.tl);
         return false;
       }
-      await for (var entry in localDir.list()) {
-        if (cancelled) {
-          break;
-        }
-        if (entry is Directory) {
-          var stat = await entry.stat();
-          var result = await _checkSingleComic(
-            entry,
-            createTime: stat.modified,
-            useRelativePath: true,
-          );
-          if (result != null) {
-            imported[null]!.add(result);
-          }
-        }
+      final existing = manager.getComics(LocalSortType.defaultSort);
+      final recovered = await scan.scan(
+        path,
+        {for (final comic in existing) ...[comic.title, comic.directory]},
+        {for (final comic in existing) comic.baseDir},
+        onProgress: (checked, total) {
+          controller.setMessage('Checked @checked/@total'.tlParams({
+            'checked': checked, 'total': total,
+          }));
+          controller.setProgress(total == 0 ? 0 : checked / total);
+        },
+      );
+      if (shouldCancel()) return false;
+      if (recovered.isEmpty) {
+        App.rootContext.showMessage(message: 'No valid comics found'.tl);
+        return false;
       }
-      if (!cancelled && imported[null]!.isEmpty) {
-        App.rootContext.showMessage(message: "No valid comics found".tl);
-      }
+      controller.setMessage('Importing'.tl);
+      controller.setProgress(0);
+      final count = await manager.registerRecoveredComics(
+        recovered,
+        shouldCancel: shouldCancel,
+        onProgress: (checked, total) =>
+            controller.setProgress(total == 0 ? 0 : checked / total),
+      );
+      if (shouldCancel()) return false;
+      App.rootContext.showMessage(
+        message: 'Imported @a comics'.tlParams({'a': count}),
+      );
+      return true;
     } catch (e, s) {
-      Log.error("Import Comic", e.toString(), s);
+      Log.error('Restore Local Downloads', e.toString(), s);
       App.rootContext.showMessage(message: e.toString());
+      return false;
+    } finally {
+      controller.close();
     }
-    controller.close();
-    if (cancelled) return false;
-    return registerComics(imported, false);
   }
 
   //Automatically search for cover image and chapters

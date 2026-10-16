@@ -10,6 +10,7 @@ import 'package:venera/foundation/export_tasks.dart';
 import 'package:venera/foundation/follow_update_tasks.dart';
 import 'package:venera/foundation/import_tasks.dart';
 import 'package:venera/foundation/history_tasks.dart';
+import 'package:venera/foundation/local_library_refresh_tasks.dart';
 import 'package:venera/foundation/image_translation/translation_models.dart';
 import 'package:venera/foundation/image_translation/pre_translation_tasks.dart';
 import 'package:venera/foundation/image_translation/translation_types.dart';
@@ -38,6 +39,7 @@ class _TasksPageState extends State<TasksPage>
 
   final followUpdateManager = FollowUpdateTaskManager.instance;
   final historyRefreshManager = HistoryRefreshTaskManager.instance;
+  final localLibraryRefreshManager = LocalLibraryRefreshTaskManager.instance;
   final relatedSourceManager = RelatedSourceTaskManager.instance;
   final sourceMigrationManager = SourceMigrationTaskManager.instance;
   final comicSourceUpdateManager = ComicSourceUpdateTaskManager.instance;
@@ -59,6 +61,7 @@ class _TasksPageState extends State<TasksPage>
     });
     followUpdateManager.addListener(update);
     historyRefreshManager.addListener(update);
+    localLibraryRefreshManager.addListener(update);
     relatedSourceManager.addListener(update);
     sourceMigrationManager.addListener(update);
     comicSourceUpdateManager.addListener(update);
@@ -75,6 +78,7 @@ class _TasksPageState extends State<TasksPage>
     _tabController.dispose();
     followUpdateManager.removeListener(update);
     historyRefreshManager.removeListener(update);
+    localLibraryRefreshManager.removeListener(update);
     relatedSourceManager.removeListener(update);
     sourceMigrationManager.removeListener(update);
     comicSourceUpdateManager.removeListener(update);
@@ -109,6 +113,7 @@ class _TasksPageState extends State<TasksPage>
               dataSyncManager.clearHistory();
               followUpdateManager.clearHistory();
               historyRefreshManager.clearHistory();
+              localLibraryRefreshManager.clearHistory();
               relatedSourceManager.clearHistory();
               sourceMigrationManager.clearHistory();
               comicSourceUpdateManager.clearHistory();
@@ -135,6 +140,8 @@ class _TasksPageState extends State<TasksPage>
         followUpdateManager.removeTask(id);
       case 'history_refresh':
         historyRefreshManager.removeTask(id);
+      case 'local_library_refresh':
+        localLibraryRefreshManager.removeTask(id);
       case 'related_source':
         relatedSourceManager.removeTask(id);
       case 'source_migration':
@@ -306,6 +313,21 @@ class _TasksPageState extends State<TasksPage>
           status: task.status.name,
           time: history ? task.finishedAt ?? task.createdAt : task.createdAt,
           builder: (_) => buildHistoryRefreshTaskCard(task, expanded: false),
+        ),
+      for (final task
+          in history
+              ? localLibraryRefreshManager.historyTasks
+              : localLibraryRefreshManager.currentTasks)
+        TaskListEntry(
+          id: 'local_library_refresh:${task.id}',
+          title: task.currentTitle ?? '',
+          category: 'Refresh Local Status',
+          status: task.status.name,
+          time: history ? task.finishedAt ?? task.createdAt : task.createdAt,
+          builder: (_) => buildLocalLibraryRefreshTaskCard(
+            task,
+            expanded: !history && task.id == widget.initialExpandedTaskId,
+          ),
         ),
       for (final task
           in history
@@ -538,6 +560,7 @@ class _TasksPageState extends State<TasksPage>
       return switch (taskType) {
         'follow_update' => Icons.sync,
         'history_refresh' => Icons.manage_history,
+        'local_library_refresh' => Icons.refresh,
         'related_source' => Icons.hub_outlined,
         'source_migration' => Icons.move_up_outlined,
         'comic_source_update' => Icons.update,
@@ -560,6 +583,7 @@ class _TasksPageState extends State<TasksPage>
     return switch (taskType) {
       'follow_update' => "Follow Update: @folder".tlParams(params),
       'history_refresh' => "History Refresh".tl,
+      'local_library_refresh' => "Refresh Local Status".tl,
       'related_source' => "Auto Link Sources: @folder".tlParams(params),
       'source_migration' => "Source Migration: @folder".tlParams(params),
       'comic_source_update' => "Update Sources".tl,
@@ -838,6 +862,96 @@ getTaskTitle('pre_translate', {'title': task.title}),
     );
 
     return _wrapHistoryCard(card, 'pre_translate', task.id, task.isRunning);
+  }
+
+  Widget buildLocalLibraryRefreshTaskCard(
+    LocalLibraryRefreshTask task, {
+    required bool expanded,
+  }) {
+    final status = switch (task.status) {
+      LocalLibraryRefreshStatus.running => "Running".tl,
+      LocalLibraryRefreshStatus.completed => "Completed".tl,
+      LocalLibraryRefreshStatus.canceled => "Canceled".tl,
+      LocalLibraryRefreshStatus.failed => "Failed".tl,
+    };
+    final progressText =
+        "${(task.progress * 100).clamp(0, 100).toStringAsFixed(0)}%";
+    final card = Card(
+      elevation: 0,
+      color: context.colorScheme.surface,
+      margin: const EdgeInsets.only(bottom: 8),
+      child: _TaskExpansionTile(
+        initiallyExpanded: expanded,
+        leading: _wrapIconWithRotation(
+          getTaskIcon(
+            'local_library_refresh',
+            task.isRunning,
+            status: task.status.name,
+          ),
+          task.isRunning,
+          task.status.name,
+        ),
+        title: Text(getTaskTitle('local_library_refresh', {})),
+        subtitle: buildTaskSubtitle(
+          [status, '${task.checked}/${task.total}', progressText],
+          task.createdAt,
+          task.finishedAt,
+        ),
+        trailing: task.isRunning
+            ? TextButton(
+                onPressed: () => localLibraryRefreshManager.cancel(task.id),
+                child: Text("Cancel".tl),
+              )
+            : null,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: LinearProgressIndicator(
+              value: task.isRunning && task.total == 0 ? null : task.progress,
+            ),
+          ),
+          const SizedBox(height: 8),
+          buildSourceBox(
+            title: "Details".tl,
+            children: [
+              Text(
+                "Total: @total  Checked: @checked  Downloaded: @downloaded  Missing: @missing  Failed: @failed"
+                    .tlParams({
+                      'total': task.total,
+                      'checked': task.checked,
+                      'downloaded': task.downloaded,
+                      'missing': task.missing,
+                      'failed': task.failed,
+                    }),
+                style: ts.s14,
+              ),
+              if (task.isRunning && task.currentTitle != null) ...[
+                const SizedBox(height: 2),
+                Text(
+                  task.currentTitle!,
+                  style: ts.s14,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+              if (task.error != null) ...[
+                const SizedBox(height: 2),
+                Text(
+                  task.error!,
+                  style: ts.s14.withColor(context.colorScheme.error),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+    return _wrapHistoryCard(
+      card,
+      'local_library_refresh',
+      task.id,
+      task.isRunning,
+    );
   }
 
   Widget buildHistoryRefreshTaskCard(

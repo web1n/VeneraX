@@ -622,6 +622,64 @@ class LocalManager with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Recover scanned files without rebuilding every mounted library once per
+  /// comic. Transactions stay synchronous; small batches yield between writes
+  /// so progress and cancellation remain responsive during large recoveries.
+  Future<int> registerRecoveredComics(
+    List<LocalComic> comics, {
+    required bool Function() shouldCancel,
+    void Function(int checked, int total)? onProgress,
+  }) async {
+    var imported = 0;
+    try {
+      for (var offset = 0; offset < comics.length; offset += 5) {
+        if (shouldCancel()) break;
+        // Other imports may have run during the preceding event-loop yield.
+        var nextId = int.parse(findValidId(ComicType.local));
+        final end = offset + 5 < comics.length ? offset + 5 : comics.length;
+        _db.execute('BEGIN TRANSACTION;');
+        var localCommitted = false;
+        try {
+          availabilityStore.batch(() {
+            for (var i = offset; i < end; i++) {
+              final comic = comics[i];
+              final exists = _db.select(
+                'SELECT 1 FROM comics WHERE title = ? OR directory IN (?, ?) LIMIT 1;',
+                [comic.title, comic.title, comic.directory],
+              );
+              if (exists.isNotEmpty) continue;
+              final recovered = LocalComic(
+                id: '${nextId++}',
+                title: comic.title,
+                subtitle: comic.subtitle,
+                tags: comic.tags,
+                directory: comic.directory,
+                chapters: comic.chapters,
+                cover: comic.cover,
+                comicType: ComicType.local,
+                downloadedChapters: comic.downloadedChapters,
+                createdAt: comic.createdAt,
+                description: comic.description,
+              );
+              _addComic(recovered, null, true);
+              imported++;
+            }
+            _db.execute('COMMIT;');
+            localCommitted = true;
+          });
+        } catch (_) {
+          if (!localCommitted) _db.execute('ROLLBACK;');
+          rethrow;
+        }
+        onProgress?.call(end, comics.length);
+        await Future<void>.delayed(Duration.zero);
+      }
+    } finally {
+      if (imported > 0 && isInitialized) notifyListeners();
+    }
+    return imported;
+  }
+
   void _addComic(LocalComic comic, String? id, bool? filesAvailable) {
     var old = find(id ?? comic.id, comic.comicType);
     var downloaded = List<String>.from(comic.downloadedChapters);

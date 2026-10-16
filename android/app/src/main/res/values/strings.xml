@@ -16,4 +16,5 @@
     <string name="background_title_comic_import">Importing comics</string>
     <string name="background_title_sync">Syncing data</string>
     <string name="background_title_webdav_migration">Migrating to WebDAV</string>
+    <string name="background_title_local_library_refresh">Refreshing local library status</string>
 </resources>

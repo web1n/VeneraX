@@ -1,5 +1,12 @@
 {
   "zh_CN": {
+    "Refresh Local Status": "刷新本地状态",
+    "Checking local files": "正在检查本地文件",
+    "Checked @checked/@total": "已检查 @checked/@total",
+    "Downloaded: @count": "已下载：@count",
+    "Missing: @count": "未下载：@count",
+    "Some comics have not been checked yet. Refresh local status to update categories.": "部分漫画尚未检查，请刷新本地状态以更新分类。",
+    "Total: @total  Checked: @checked  Downloaded: @downloaded  Missing: @missing  Failed: @failed": "共 @total 本，已检查 @checked 本，已下载 @downloaded 本，未下载 @missing 本，检查失败 @failed 本",
     "Current comic": "当前漫画",
     "This device": "本设备",
     "Inherited from this device": "继承本设备设置",
@@ -1440,6 +1447,13 @@
     "This removes every stored translation and rendered page of this comic. The original images are unaffected.": "将删除本漫画所有已存的翻译和嵌字页面，原图不受影响。"
   },
   "zh_TW": {
+    "Refresh Local Status": "重新整理本機狀態",
+    "Checking local files": "正在檢查本機檔案",
+    "Checked @checked/@total": "已檢查 @checked/@total",
+    "Downloaded: @count": "已下載：@count",
+    "Missing: @count": "未下載：@count",
+    "Some comics have not been checked yet. Refresh local status to update categories.": "部分漫畫尚未檢查，請重新整理本機狀態以更新分類。",
+    "Total: @total  Checked: @checked  Downloaded: @downloaded  Missing: @missing  Failed: @failed": "共 @total 本，已檢查 @checked 本，已下載 @downloaded 本，未下載 @missing 本，檢查失敗 @failed 本",
     "Current comic": "目前漫畫",
     "This device": "本裝置",
     "Inherited from this device": "沿用本裝置設定",
