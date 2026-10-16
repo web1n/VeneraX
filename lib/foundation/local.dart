@@ -345,45 +345,23 @@ class LocalManager with ChangeNotifier {
 
   Directory get directory => Directory(path);
 
-  void _checkNoMedia() {
+  void _checkNoMedia([String? storagePath]) {
     if (App.isAndroid) {
-      var file = File(FilePath.join(path, '.nomedia'));
+      var file = File(FilePath.join(storagePath ?? path, '.nomedia'));
       if (!file.existsSync()) {
         file.createSync();
       }
     }
   }
 
-  /// Sentinel returned by [setNewPath] when the chosen directory is not empty
-  /// and the caller has not opted in to merging. Callers should compare the
-  /// return value against this constant (not show it as an error) to decide
-  /// whether to ask the user for confirmation.
-  static const dirNotEmptySignal = "__venera_dir_not_empty__";
-
-  // return error message if failed, [dirNotEmptySignal] if the target is not
-  // empty and [allowNonEmpty] is false.
-  Future<String?> setNewPath(String newPath, {bool allowNonEmpty = false}) async {
-    var newDir = Directory(newPath);
-    if (!await newDir.exists()) {
-      return "Directory does not exist";
-    }
-    if (!allowNonEmpty && !await newDir.list().isEmpty) {
-      // Don't hard-fail: let the caller confirm merging into a non-empty
-      // directory (e.g. an existing folder on an SD card). Returning a sentinel
-      // keeps the "must be empty" safety while giving the user a way forward.
-      return dirNotEmptySignal;
-    }
-    final oldDir = directory;
+  /// Switch storage without moving or deleting files in either directory.
+  Future<String?> setNewPath(String newPath) async {
+    if (newPath == path) return null;
     try {
-      await copyDirectoryIsolate(oldDir, newDir);
-      // Verify the copy looks complete before destroying the source. SAF
-      // targets can fail silently; deleting the source after an incomplete
-      // copy would lose data. We only abort when we can positively confirm the
-      // destination has fewer files than the source — if the count itself
-      // throws (slow/unsupported on some SAF impls), we trust the copy.
-      if (!await _verifyCopied(oldDir, newDir)) {
-        return "Failed to copy all files to the new location";
+      if (!await Directory(newPath).exists()) {
+        return "Directory does not exist";
       }
+      _checkNoMedia(newPath);
       await File(
         FilePath.join(App.dataPath, 'local_path'),
       ).writeAsString(newPath);
@@ -391,68 +369,12 @@ class LocalManager with ChangeNotifier {
       Log.error("IO", e, s);
       return e.toString();
     }
-    // Capture transferable states and retire old-path scans before cleanup.
-    // Publishing the new path synchronously also makes any new refresh target
-    // the copied files, rather than the directory being deleted below.
-    final comics = getComics(LocalSortType.defaultSort);
-    final previousStates = {
-      for (final comic in comics)
-        (comic.id, comic.comicType.value): availabilityStore.lookup(
-          comic.id, comic.comicType.value, comic.baseDir,
-        ),
-    };
     path = newPath;
+    // Retire scans of the previous path. Cached availability is already keyed
+    // by base directory, so old results cannot classify the new location.
     availabilityGeneration++;
-    availabilityStore.batch(() {
-      for (final comic in comics) {
-        final available = previousStates[(comic.id, comic.comicType.value)];
-        if (available != null) {
-          // An existing destination may contain files absent from the old
-          // folder. Recheck those comics instead of carrying "missing" into
-          // the merged library. Absolute imports have not moved.
-          if (!available && allowNonEmpty &&
-              !comic.directory.contains('/') &&
-              !comic.directory.contains('\\')) {
-            availabilityStore.remove(comic.id, comic.comicType.value);
-            continue;
-          }
-          availabilityStore.set(
-            comic.id, comic.comicType.value, comic.baseDir, available,
-          );
-        }
-      }
-    });
-    _checkNoMedia();
     notifyListeners();
-    // The data now lives at [newPath]; clearing the old directory is
-    // best-effort. A failure here must not roll back the switch, so swallow it.
-    try {
-      await oldDir.deleteContents(recursive: true);
-    } catch (e, s) {
-      Log.error("IO", "Failed to clean old storage path: $e", s);
-    }
     return null;
-  }
-
-  /// Best-effort completeness check: returns false only when the destination is
-  /// confirmed to contain fewer files than the source. Any error while counting
-  /// is treated as "cannot disprove" and returns true so a valid copy is not
-  /// rejected on platforms where recursive listing is unreliable.
-  Future<bool> _verifyCopied(Directory source, Directory dest) async {
-    try {
-      int countFiles(Directory d) {
-        if (!d.existsSync()) return 0;
-        return d.listSync(recursive: true).whereType<File>().length;
-      }
-
-      final srcCount = countFiles(source);
-      final dstCount = countFiles(dest);
-      if (srcCount == 0) return true;
-      return dstCount >= srcCount;
-    } catch (e, s) {
-      Log.error("IO", "Copy verification skipped: $e", s);
-      return true;
-    }
   }
 
   Future<String> findDefaultPath() async {
