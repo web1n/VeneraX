@@ -539,8 +539,8 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage>
     return false;
   }
 
-  void downloadSelected() async {
-    if (!await ensureDownloadStorageWritable()) return;
+  void downloadSelected({bool addTasksOnly = false}) async {
+    if (!addTasksOnly && !await ensureDownloadStorageWritable()) return;
     // Build the tasks first, then enqueue them in one batch so the queue is
     // persisted a single time instead of once per comic (#17).
     var tasks = <DownloadTask>[];
@@ -556,7 +556,7 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage>
           comicId: fav.id,
           comicTitle: fav.title,
           comicCover: fav.cover,
-        ),
+        )..userPaused = addTasksOnly,
       );
     }
     if (tasks.isNotEmpty) {
@@ -898,6 +898,11 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage>
                     icon: Icons.download,
                     text: "Download".tl,
                     onClick: downloadSelected,
+                  ),
+                  MenuEntry(
+                    icon: Icons.playlist_add,
+                    text: "Download selected (add tasks only)".tl,
+                    onClick: () => downloadSelected(addTasksOnly: true),
                   ),
                   MenuEntry(
                     icon: Icons.move_up_outlined,

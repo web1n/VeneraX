@@ -1,5 +1,6 @@
 {
   "zh_CN": {
+    "Download selected (add tasks only)": "多选下载（仅添加任务）",
     "Refresh downloading comics with the same name": "刷新正在下载的同名漫画",
     "Only paused, unstarted tasks are updated. A chapter with any body image counts as downloaded.": "仅更新已暂停且未开始下载的任务。章节有正文图片即视为已下载。",
     "Refresh Local Status": "刷新本地状态",
@@ -1449,6 +1450,7 @@
     "This removes every stored translation and rendered page of this comic. The original images are unaffected.": "将删除本漫画所有已存的翻译和嵌字页面，原图不受影响。"
   },
   "zh_TW": {
+    "Download selected (add tasks only)": "多選下載（僅新增任務）",
     "Refresh downloading comics with the same name": "重新整理正在下載的同名漫畫",
     "Only paused, unstarted tasks are updated. A chapter with any body image counts as downloaded.": "僅更新已暫停且未開始下載的任務。章節有正文圖片即視為已下載。",
     "Refresh Local Status": "重新整理本機狀態",
