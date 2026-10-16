@@ -99,6 +99,12 @@ class _DataSyncSettingsState extends State<DataSyncSettings> {
                 },
               ),
             ),
+            if (App.isAndroid)
+              _SwitchSetting(
+                title: "Create .nomedia file".tl,
+                settingKey: 'createNoMedia',
+                subtitle: "When disabled, no new .nomedia files are created. Existing files are kept.".tl,
+              ),
             _CallbackSetting(
               title: "Set New Storage Path".tl,
               actionTitle: "Set".tl,

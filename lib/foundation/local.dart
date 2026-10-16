@@ -346,7 +346,7 @@ class LocalManager with ChangeNotifier {
   Directory get directory => Directory(path);
 
   void _checkNoMedia([String? storagePath]) {
-    if (App.isAndroid) {
+    if (App.isAndroid && appdata.settings['createNoMedia'] == true) {
       var file = File(FilePath.join(storagePath ?? path, '.nomedia'));
       if (!file.existsSync()) {
         file.createSync();

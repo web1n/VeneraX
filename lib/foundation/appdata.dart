@@ -405,6 +405,7 @@ class Settings with ChangeNotifier {
     'language': 'system', // system, zh-CN, zh-TW, en-US
     'cacheSize': 2048, // in MB
     'downloadThreads': 5,
+    'createNoMedia': true,
     'maxParallelDownloads': 1, // how many comics download at once (1-3)
     'downloadWifiOnly': false, // pause active downloads on metered networks
     'minimizeToTray': false, // Windows 关闭窗口时最小化到系统托盘
