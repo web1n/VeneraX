@@ -1190,6 +1190,8 @@ class _ImportComicsWidgetState extends State<ImportComicsWidget> {
 
   bool copyToLocalFolder = true;
 
+  bool refreshDownloading = false;
+
   bool cancelled = false;
 
   @override
@@ -1268,6 +1270,15 @@ class _ImportComicsWidgetState extends State<ImportComicsWidget> {
                         });
                       },
                     ).paddingHorizontal(8),
+                  if (type == 1 || type == 3)
+                    CheckboxListTile(
+                      title: Text('Refresh downloading comics with the same name'.tl),
+                      subtitle: Text(
+                        'Only paused, unstarted tasks are updated. A chapter with any body image counts as downloaded.'.tl,
+                      ),
+                      value: refreshDownloading,
+                      onChanged: (value) => setState(() => refreshDownloading = value ?? false),
+                    ).paddingHorizontal(8),
                   const SizedBox(height: 8),
                   Text(info).paddingHorizontal(24),
                   if (type == 0)
@@ -1324,6 +1335,7 @@ class _ImportComicsWidgetState extends State<ImportComicsWidget> {
     var importer = ImportComic(
       selectedFolder: selectedFolder,
       copyToLocal: copyToLocalFolder,
+      refreshDownloading: refreshDownloading && (type == 1 || type == 3),
     );
     bool result;
     try {
@@ -1337,6 +1349,7 @@ class _ImportComicsWidgetState extends State<ImportComicsWidget> {
     } finally {
       BackgroundKeepAlive.instance.remove(BackgroundKeepAlive.tagComicImport);
     }
+    if (!mounted) return;
     if (result) {
       context.pop();
     } else {

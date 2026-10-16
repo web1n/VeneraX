@@ -970,6 +970,76 @@ class LocalManager with ChangeNotifier {
     }
   }
 
+  /// Scheduled body images count as started even before progress is saved.
+  bool canRefreshUnstartedDownload(ImagesDownloadTask task) {
+    final state = task.toJson();
+    return (state['downloadedCount'] as num? ?? 0) == 0 &&
+        (state['index'] as num? ?? 0) == 0 &&
+        (state['chapter'] as num? ?? 0) == 0 && task.tasks.isEmpty;
+  }
+
+  /// Rebuild only an untouched, paused task using chapters found on disk.
+  /// Removing a fully restored task does not invoke cancel/delete cleanup.
+  int refreshUnstartedDownload(
+    ImagesDownloadTask task, {
+    required String storagePath,
+    required ComicDetails details,
+    required List<String> foundChapters,
+    String? bodyImage,
+  }) {
+    final index = downloadingTasks.indexWhere((item) => identical(item, task));
+    if (index < 0 || !task.isPaused || !task.userPaused ||
+        !canRefreshUnstartedDownload(task)) return 0;
+    final selected = details.chapters == null
+        ? <String>['']
+        : details.chapters!.ids
+            .where((id) => task.chapters == null || task.chapters!.contains(id))
+            .toList();
+    final found = foundChapters.toSet();
+    final matched = selected.where(found.contains).toList();
+    if (matched.isEmpty) return 0;
+    final remaining = selected.where((id) => !found.contains(id)).toList();
+    final replacement = remaining.isEmpty ? null : ImagesDownloadTask.fromJson({
+      ...task.toJson(),
+      'comic': {...details.toJson(), 'subtitle': details.subTitle},
+      'chapters': remaining,
+      'path': storagePath,
+      // The downloader stores its cover at the root. A discovered chapter
+      // image is suitable for the local record, but not its cover marker.
+      'cover': null,
+      'images': null,
+      'downloadedCount': 0,
+      'totalCount': 0,
+      'totalChapters': 0,
+      'index': 0,
+      'chapter': 0,
+      'wasRunning': false,
+      'userPaused': true,
+    });
+    _addComic(LocalComic(
+      id: task.id,
+      title: details.title,
+      subtitle: details.subTitle ?? '',
+      tags: details.tags.entries.expand((entry) =>
+          entry.value.map((value) => '${entry.key}:$value')).toList(),
+      directory: storagePath,
+      chapters: details.chapters,
+      cover: bodyImage ?? '',
+      comicType: task.comicType,
+      downloadedChapters: details.chapters == null ? [] : matched,
+      createdAt: DateTime.now(),
+      description: details.description ?? '',
+    ), null, true);
+    if (replacement == null) {
+      downloadingTasks.removeAt(index);
+    } else {
+      downloadingTasks[index] = replacement;
+    }
+    scheduleSaveDownloadingTasks();
+    notifyListeners();
+    return matched.length;
+  }
+
   /// User-initiated pause of a single task. Marks it [DownloadTask.userPaused]
   /// so the queue won't auto-resume it, then lets the queue fill the freed slot
   /// with the next runnable task (#9).

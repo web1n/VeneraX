@@ -13,6 +13,7 @@ import 'package:venera/utils/translations.dart';
 import 'cbz.dart';
 import 'io.dart';
 import 'local_comic_scanner.dart';
+import 'import_download_refresh.dart';
 import 'pdf_import.dart';
 import 'venera_comics.dart';
 
@@ -20,7 +21,13 @@ class ImportComic {
   final String? selectedFolder;
   final bool copyToLocal;
 
-  const ImportComic({this.selectedFolder, this.copyToLocal = true});
+  final ImportDownloadRefresh? _downloadRefresh;
+
+  ImportComic({
+    this.selectedFolder,
+    this.copyToLocal = true,
+    bool refreshDownloading = false,
+  }) : _downloadRefresh = refreshDownloading ? ImportDownloadRefresh() : null;
 
   Future<bool> cbz() async {
     var file = await selectFile(ext: ['cbz', 'zip', '7z', 'cb7']);
@@ -362,8 +369,12 @@ class ImportComic {
       final existing = manager.getComics(LocalSortType.defaultSort);
       final recovered = await scan.scan(
         path,
-        {for (final comic in existing) ...[comic.title, comic.directory]},
-        {for (final comic in existing) comic.baseDir},
+        _downloadRefresh == null
+            ? {for (final comic in existing) ...[comic.title, comic.directory]}
+            : <String>{},
+        _downloadRefresh == null
+            ? {for (final comic in existing) comic.baseDir}
+            : <String>{},
         onProgress: (checked, total) {
           controller.setMessage('Checked @checked/@total'.tlParams({
             'checked': checked, 'total': total,
@@ -378,8 +389,20 @@ class ImportComic {
       }
       controller.setMessage('Importing'.tl);
       controller.setProgress(0);
-      final count = await manager.registerRecoveredComics(
-        recovered,
+      var updated = 0;
+      final ordinary = <LocalComic>[];
+      for (final comic in recovered) {
+        if (shouldCancel()) break;
+        final refreshed = await _downloadRefresh?.refresh(comic, shouldCancel: shouldCancel);
+        if (refreshed == null) {
+          ordinary.add(comic);
+        } else {
+          updated++;
+        }
+      }
+      if (shouldCancel()) return false;
+      final count = updated + await manager.registerRecoveredComics(
+        ordinary,
         shouldCancel: shouldCancel,
         onProgress: (checked, total) =>
             controller.setProgress(total == 0 ? 0 : checked / total),
@@ -414,6 +437,7 @@ class ImportComic {
       tags: tags,
       createTime: createTime,
       useRelativePath: useRelativePath,
+      rejectExisting: _downloadRefresh == null,
     );
   }
 
@@ -426,7 +450,14 @@ class ImportComic {
       for (var dir in toBeCopied) {
         var source = Directory(dir);
         var dest = Directory("$destination/${source.name}");
-        if (dest.existsSync()) {
+        if (data['preserveExisting'] == true) {
+          // Never replace a paused task's original directory with imported
+          // files: that would hide partial progress and invalidate its path.
+          var suffix = 1;
+          while (dest.existsSync()) {
+            dest = Directory(FilePath.join(destination, '${source.name}_import${suffix++}'));
+          }
+        } else if (dest.existsSync()) {
           // The destination directory already exists, and it is not managed by the app.
           // Rename the old directory to avoid conflicts.
           Log.info("Import Comic",
@@ -464,6 +495,7 @@ class ImportComic {
           'toBeCopied':
               comics[favoriteFolder]!.map((e) => e.directory).toList(),
           'destination': destPath,
+          'preserveExisting': _downloadRefresh != null,
         });
         //Construct a new object since LocalComic.directory is a final String
         for (var c in comics[favoriteFolder]!) {
@@ -499,8 +531,15 @@ class ImportComic {
       int importedCount = 0;
       for (var folder in importedComics.keys) {
         for (var comic in importedComics[folder]!) {
-          var id = LocalManager().findValidId(ComicType.local);
-          LocalManager().add(comic, id, true);
+          final refreshed = await _downloadRefresh?.refresh(comic);
+          if (refreshed != null) {
+            comic = refreshed;
+          } else if (_downloadRefresh != null &&
+              LocalManager().findByName(comic.title) != null) {
+            continue;
+          }
+          final id = refreshed?.id ?? LocalManager().findValidId(ComicType.local);
+          if (refreshed == null) await LocalManager().add(comic, id, true);
           importedCount++;
           if (folder != null) {
             LocalFavoritesManager().addComic(
