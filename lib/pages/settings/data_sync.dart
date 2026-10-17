@@ -9,6 +9,21 @@ class DataSyncSettings extends StatefulWidget {
 }
 
 class _DataSyncSettingsState extends State<DataSyncSettings> {
+  Future<String> _preferDirectStoragePath(String selectedPath) async {
+    if (!App.isAndroid || !selectedPath.startsWith('android://')) {
+      return selectedPath;
+    }
+    try {
+      const channel = MethodChannel('venera/storage');
+      final path = await channel.invokeMethod<String>(
+        'resolveDirectDirectory', {'path': selectedPath},
+      );
+      return path == null || path.isEmpty ? selectedPath : path;
+    } catch (_) {
+      return selectedPath;
+    }
+  }
+
   String _importTaskMessage(ImportTask task) {
     if (task.phase == ImportPhase.extracting) {
       if (task.extractedBytes <= 0) return "Extracting".tl;
@@ -128,7 +143,8 @@ class _DataSyncSettingsState extends State<DataSyncSettings> {
                   );
                   String? error;
                   try {
-                    error = await LocalManager().setNewPath(result!);
+                    final path = await _preferDirectStoragePath(result!);
+                    error = await LocalManager().setNewPath(path);
                   } finally {
                     loadingDialog.close();
                   }

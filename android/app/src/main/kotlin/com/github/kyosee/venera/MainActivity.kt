@@ -225,9 +225,21 @@ class MainActivity : FlutterFragmentActivity() {
             })
 
         val storageChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "venera/storage")
-        storageChannel.setMethodCallHandler { _, res ->
-            requestStoragePermission { result ->
-                res.success(result)
+        storageChannel.setMethodCallHandler { call, res ->
+            when (call.method) {
+                "request" -> requestStoragePermission { result -> res.success(result) }
+                "resolveDirectDirectory" -> {
+                    val selectedPath = call.argument<String>("path")
+                    if (selectedPath == null || !hasStoragePermission()) {
+                        res.success(null)
+                    } else {
+                        Thread {
+                            val path = StoragePathResolver.resolve(this, selectedPath)
+                            runOnUiThread { res.success(path) }
+                        }.start()
+                    }
+                }
+                else -> res.notImplemented()
             }
         }
 
