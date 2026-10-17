@@ -255,15 +255,22 @@ class LocalLibraryRefreshTaskManager with ChangeNotifier {
 
 /// Only paths and primitive results cross the isolate boundary. The worker
 /// never opens a database or holds the UI's LocalManager/SQLite connection.
-void _scanLibraryDirectories((SendPort, List<String>) request) {
+Future<void> _scanLibraryDirectories((SendPort, List<String>) request) async {
   final (port, paths) = request;
-  overrideIO(() {
+  await overrideIO(() async {
     for (var i = 0; i < paths.length; i++) {
       try {
         final dir = Directory(paths[i]);
-        final available = dir.existsSync() && dir.listSync().any((entity) =>
-            entity is File ||
-            (entity is Directory && entity.listSync().isNotEmpty));
+        final bool available;
+        if (paths[i].startsWith('android://')) {
+          // Saved SAF paths continue through the plugin, which materializes
+          // a full listing internally.
+          available = dir.existsSync() && dir.listSync().any((entity) =>
+              entity is File ||
+              (entity is Directory && entity.listSync().isNotEmpty));
+        } else {
+          available = await _hasLocalFiles(dir);
+        }
         port.send({'index': i, 'available': available});
       } catch (e) {
         // Permission/storage failures are not proof that files were deleted.
@@ -271,4 +278,13 @@ void _scanLibraryDirectories((SendPort, List<String>) request) {
       }
     }
   });
+}
+
+Future<bool> _hasLocalFiles(Directory dir) async {
+  if (!await dir.exists()) return false;
+  await for (final entity in dir.list()) {
+    if (entity is File ||
+        (entity is Directory && !await entity.list().isEmpty)) return true;
+  }
+  return false;
 }
