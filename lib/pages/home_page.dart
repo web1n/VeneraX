@@ -16,6 +16,7 @@ import 'package:venera/foundation/image_translation/translation_service.dart';
 import 'package:venera/foundation/image_translation/translation_store.dart';
 import 'package:venera/foundation/read_later.dart';
 import 'package:venera/foundation/local.dart';
+import 'package:venera/foundation/local_download_recovery_tasks.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/webdav_library_store.dart';
 import 'package:venera/pages/comic_collections_page.dart';
@@ -1176,6 +1177,20 @@ class ImportComicsWidget extends StatefulWidget {
 }
 
 class _ImportComicsWidgetState extends State<ImportComicsWidget> {
+  final recoveryManager = LocalDownloadRecoveryTaskManager.instance;
+  LocalDownloadRecoveryTask? recoveryTask;
+
+  @override
+  void initState() {
+    super.initState();
+    recoveryTask = recoveryManager.currentTasks.firstOrNull;
+    recoveryManager.addListener(_updateRecovery);
+  }
+
+  void _updateRecovery() {
+    if (mounted) setState(() {});
+  }
+
   int type = 0;
 
   bool loading = false;
@@ -1196,12 +1211,14 @@ class _ImportComicsWidgetState extends State<ImportComicsWidget> {
 
   @override
   void dispose() {
+    recoveryManager.removeListener(_updateRecovery);
     loading = false;
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (recoveryTask case final task?) return _buildRecoveryProgress(task);
     String info = [
       "Select comic files (cbz, zip, 7z, cb7, pdf, or .venera_comics).".tl,
       "Select a folder; single/multiple will be detected.".tl,
@@ -1321,6 +1338,12 @@ class _ImportComicsWidgetState extends State<ImportComicsWidget> {
   }
 
   void selectAndImport() async {
+    if (loading) return;
+    if (type == 3) {
+      final task = recoveryManager.start(refreshDownloading: refreshDownloading);
+      setState(() => recoveryTask = task);
+      return;
+    }
     height = key.currentContext!.size!.height;
 
     setState(() {
@@ -1343,7 +1366,6 @@ class _ImportComicsWidgetState extends State<ImportComicsWidget> {
         0 => await importer.files(),
         1 => await _importFolderWithConfirm(importer),
         2 => await importer.ehViewer(),
-        3 => await importer.localDownloads(),
         int() => true,
       };
     } finally {
@@ -1357,6 +1379,57 @@ class _ImportComicsWidgetState extends State<ImportComicsWidget> {
         loading = false;
       });
     }
+  }
+
+  Widget _buildRecoveryProgress(LocalDownloadRecoveryTask task) {
+    final status = switch (task.status) {
+      LocalDownloadRecoveryStatus.running => task.cancelRequested
+          ? 'Canceling'.tl : task.phase.tl,
+      LocalDownloadRecoveryStatus.completed => 'Completed'.tl,
+      LocalDownloadRecoveryStatus.canceled => 'Canceled'.tl,
+      LocalDownloadRecoveryStatus.failed => 'Failed'.tl,
+    };
+    return ContentDialog(
+      title: 'Restore local downloads'.tl,
+      content: SizedBox(
+        width: 600,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(status),
+            const SizedBox(height: 12),
+            LinearProgressIndicator(
+              value: task.isRunning && task.total == 0 ? null : task.progress,
+            ),
+            const SizedBox(height: 12),
+            Text('Checked @checked/@total'.tlParams({
+              'checked': task.checked, 'total': task.total,
+            })),
+            Text('Imported @a comics'.tlParams({'a': task.imported})),
+            if (task.currentTitle != null) ...[
+              const SizedBox(height: 8),
+              Text(task.currentTitle!, maxLines: 2, overflow: TextOverflow.ellipsis),
+            ],
+            if (task.error != null) ...[
+              const SizedBox(height: 8),
+              Text(task.error!, style: TextStyle(color: context.colorScheme.error)),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        if (task.isRunning)
+          TextButton(
+            onPressed: task.cancelRequested ? null : () => recoveryManager.cancel(task.id),
+            child: Text('Cancel'.tl),
+          ),
+        Button.filled(
+          onPressed: () => context.pop(),
+          child: Text(task.isRunning ? 'Background'.tl : 'OK'.tl),
+        ),
+      ],
+    );
   }
 
   Future<bool> _importFolderWithConfirm(ImportComic importer) async {

@@ -343,82 +343,64 @@ class ImportComic {
     return (kind: guessMulti ? 'multi' : 'single', guessMulti: guessMulti, dir: path);
   }
 
-  Future<bool> localDownloads() async {
+  /// Runs independently of any dialog. Completed writes survive cancellation.
+  Future<int> localDownloads({
+    required LocalDownloadRecoveryScan scan,
+    required bool Function() shouldCancel,
+    required void Function(String phase, int checked, int total,
+        String? title, int imported) onProgress,
+  }) async {
     final manager = LocalManager();
     final path = manager.path;
-    final generation = manager.availabilityGeneration;
-    final scan = LocalDownloadRecoveryScan();
-    var canceled = false;
-    bool shouldCancel() => canceled || !manager.isInitialized ||
-        manager.availabilityGeneration != generation;
-    final controller = showLoadingDialog(
-      App.rootContext,
-      barrierDismissible: false,
-      withProgress: true,
-      message: 'Restore local downloads'.tl,
-      onCancel: () {
-        canceled = true;
-        scan.cancel();
-      },
-    );
-    try {
-      if (!await manager.directory.exists()) {
-        App.rootContext.showMessage(message: 'Local path not found'.tl);
-        return false;
-      }
-      final existing = manager.getComics(LocalSortType.defaultSort);
-      final recovered = await scan.scan(
-        path,
-        _downloadRefresh == null
-            ? {for (final comic in existing) ...[comic.title, comic.directory]}
-            : <String>{},
-        _downloadRefresh == null
-            ? {for (final comic in existing) comic.baseDir}
-            : <String>{},
-        onProgress: (checked, total) {
-          controller.setMessage('Checked @checked/@total'.tlParams({
-            'checked': checked, 'total': total,
-          }));
-          controller.setProgress(total == 0 ? 0 : checked / total);
-        },
-      );
-      if (shouldCancel()) return false;
-      if (recovered.isEmpty) {
-        App.rootContext.showMessage(message: 'No valid comics found'.tl);
-        return false;
-      }
-      controller.setMessage('Importing'.tl);
-      controller.setProgress(0);
-      var updated = 0;
-      final ordinary = <LocalComic>[];
-      for (final comic in recovered) {
-        if (shouldCancel()) break;
-        final refreshed = await _downloadRefresh?.refresh(comic, shouldCancel: shouldCancel);
-        if (refreshed == null) {
-          ordinary.add(comic);
-        } else {
-          updated++;
-        }
-      }
-      if (shouldCancel()) return false;
-      final count = updated + await manager.registerRecoveredComics(
-        ordinary,
-        shouldCancel: shouldCancel,
-        onProgress: (checked, total) =>
-            controller.setProgress(total == 0 ? 0 : checked / total),
-      );
-      if (shouldCancel()) return false;
-      App.rootContext.showMessage(
-        message: 'Imported @a comics'.tlParams({'a': count}),
-      );
-      return true;
-    } catch (e, s) {
-      Log.error('Restore Local Downloads', e.toString(), s);
-      App.rootContext.showMessage(message: e.toString());
-      return false;
-    } finally {
-      controller.close();
+    if (!await manager.directory.exists()) {
+      throw StateError('Local path not found'.tl);
     }
+    if (shouldCancel()) return 0;
+    final existing = manager.getComics(LocalSortType.defaultSort);
+    final recovered = await scan.scan(
+      path,
+      _downloadRefresh == null
+          ? {for (final comic in existing) ...[comic.title, comic.directory]}
+          : <String>{},
+      _downloadRefresh == null
+          ? {for (final comic in existing) comic.baseDir}
+          : <String>{},
+      onProgress: (checked, total) =>
+          onProgress('Checking local files', checked, total, null, 0),
+    );
+    if (shouldCancel()) return 0;
+    var updated = 0;
+    final ordinary = <LocalComic>[];
+    if (_downloadRefresh != null) {
+      for (var i = 0; i < recovered.length; i++) {
+        if (shouldCancel()) return updated;
+        final comic = recovered[i];
+        onProgress('Matching download tasks', i, recovered.length,
+            comic.title, updated);
+        // Yield even for unmatched comics so cancellation and UI updates run.
+        await Future<void>.delayed(Duration.zero);
+        if (shouldCancel()) return updated;
+        final refreshed = await _downloadRefresh.refresh(
+          comic, shouldCancel: shouldCancel,
+        );
+        if (refreshed != null) updated++;
+        if (shouldCancel()) return updated;
+        if (refreshed == null) ordinary.add(comic);
+        onProgress('Matching download tasks', i + 1, recovered.length,
+            comic.title, updated);
+      }
+    } else {
+      ordinary.addAll(recovered);
+    }
+    if (shouldCancel()) return updated;
+    onProgress('Importing', 0, ordinary.length, null, updated);
+    final imported = await manager.registerRecoveredComics(
+      ordinary,
+      shouldCancel: shouldCancel,
+      onProgress: (checked, total, imported) =>
+          onProgress('Importing', checked, total, null, updated + imported),
+    );
+    return updated + imported;
   }
 
   //Automatically search for cover image and chapters

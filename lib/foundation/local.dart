@@ -550,7 +550,7 @@ class LocalManager with ChangeNotifier {
   Future<int> registerRecoveredComics(
     List<LocalComic> comics, {
     required bool Function() shouldCancel,
-    void Function(int checked, int total)? onProgress,
+    void Function(int checked, int total, int imported)? onProgress,
   }) async {
     var imported = 0;
     try {
@@ -593,7 +593,7 @@ class LocalManager with ChangeNotifier {
           if (!localCommitted) _db.execute('ROLLBACK;');
           rethrow;
         }
-        onProgress?.call(end, comics.length);
+        onProgress?.call(end, comics.length, imported);
         await Future<void>.delayed(Duration.zero);
       }
     } finally {

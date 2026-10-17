@@ -170,7 +170,7 @@ class BackgroundKeepAliveService : Service() {
     /** 点击本类通知时应跳转到的 Flutter 路由；未知 tag 返回 null（回到应用即可）。 */
     private fun routeFor(tag: String): String? = when (tag) {
         TAG_FOLLOW_UPDATE -> ROUTE_FOLLOW_UPDATES
-        TAG_IMPORT, TAG_EXPORT, TAG_COMIC_IMPORT, TAG_SYNC, TAG_PRE_TRANSLATE, TAG_WEBDAV_MIGRATION, TAG_LOCAL_LIBRARY_REFRESH -> ROUTE_TASKS
+        TAG_IMPORT, TAG_EXPORT, TAG_COMIC_IMPORT, TAG_SYNC, TAG_PRE_TRANSLATE, TAG_WEBDAV_MIGRATION, TAG_LOCAL_LIBRARY_REFRESH, TAG_LOCAL_DOWNLOAD_RECOVERY -> ROUTE_TASKS
         else -> null
     }
 
@@ -179,7 +179,7 @@ class BackgroundKeepAliveService : Service() {
             TAG_FOLLOW_UPDATE -> R.string.background_title_follow_update
             TAG_IMPORT -> R.string.background_title_import
             TAG_EXPORT -> R.string.background_title_export
-            TAG_COMIC_IMPORT -> R.string.background_title_comic_import
+            TAG_COMIC_IMPORT, TAG_LOCAL_DOWNLOAD_RECOVERY -> R.string.background_title_comic_import
             TAG_SYNC -> R.string.background_title_sync
             TAG_WEBDAV_MIGRATION -> R.string.background_title_webdav_migration
             TAG_LOCAL_LIBRARY_REFRESH -> R.string.background_title_local_library_refresh
@@ -231,6 +231,7 @@ class BackgroundKeepAliveService : Service() {
         const val TAG_PRE_TRANSLATE = "pre_translate"
         const val TAG_WEBDAV_MIGRATION = "webdav_migration"
         const val TAG_LOCAL_LIBRARY_REFRESH = "local_library_refresh"
+        const val TAG_LOCAL_DOWNLOAD_RECOVERY = "local_download_recovery"
 
         // 点击通知时携带给 MainActivity 的 Flutter 路由。追更单独落到追更列表页，
         // 其余各类后台任务统一落到任务页。
@@ -246,7 +247,8 @@ class BackgroundKeepAliveService : Service() {
             TAG_PRE_TRANSLATE -> BASE_NOTE_ID + 6
             TAG_WEBDAV_MIGRATION -> BASE_NOTE_ID + 7
             TAG_LOCAL_LIBRARY_REFRESH -> BASE_NOTE_ID + 8
-            else -> BASE_NOTE_ID + (tag.hashCode() and 0x3F) + 9
+            TAG_LOCAL_DOWNLOAD_RECOVERY -> BASE_NOTE_ID + 9
+            else -> BASE_NOTE_ID + (tag.hashCode() and 0x3F) + 10
         }
 
         /** 上报某类任务的最新状态，或在已运行时刷新其通知文案。幂等。 */

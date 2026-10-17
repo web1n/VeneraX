@@ -46,9 +46,13 @@ class ImportDownloadRefresh {
         final loadInfo = task.source.loadComicInfo;
         if (loadInfo == null) return null;
         final result = await loadInfo(task.comicId);
-        if (result.error) return null;
+        if (shouldCancel?.call() == true) return null;
+        if (result.error) {
+          throw StateError(result.errorMessage ?? 'Unable to load comic details');
+        }
         details = result.data;
       }
+      if (shouldCancel?.call() == true) return null;
       final ids = details.chapters == null ? <String>['']
           : details.chapters!.ids.where((id) =>
               task.chapters == null || task.chapters!.contains(id)).toList();
@@ -72,7 +76,10 @@ class ImportDownloadRefresh {
       return manager.find(task.id, task.comicType);
     } catch (error, stack) {
       Log.error('Import Download Refresh', error, stack);
-      return null;
+      if (shouldCancel?.call() == true) return null;
+      // A failed lookup/read is not proof that this is an unrelated comic.
+      // Let the importer report it instead of creating a local duplicate.
+      rethrow;
     }
   }
 }

@@ -11,6 +11,7 @@ import 'package:venera/foundation/follow_update_tasks.dart';
 import 'package:venera/foundation/import_tasks.dart';
 import 'package:venera/foundation/history_tasks.dart';
 import 'package:venera/foundation/local_library_refresh_tasks.dart';
+import 'package:venera/foundation/local_download_recovery_tasks.dart';
 import 'package:venera/foundation/image_translation/translation_models.dart';
 import 'package:venera/foundation/image_translation/pre_translation_tasks.dart';
 import 'package:venera/foundation/image_translation/translation_types.dart';
@@ -40,6 +41,7 @@ class _TasksPageState extends State<TasksPage>
   final followUpdateManager = FollowUpdateTaskManager.instance;
   final historyRefreshManager = HistoryRefreshTaskManager.instance;
   final localLibraryRefreshManager = LocalLibraryRefreshTaskManager.instance;
+  final localDownloadRecoveryManager = LocalDownloadRecoveryTaskManager.instance;
   final relatedSourceManager = RelatedSourceTaskManager.instance;
   final sourceMigrationManager = SourceMigrationTaskManager.instance;
   final comicSourceUpdateManager = ComicSourceUpdateTaskManager.instance;
@@ -62,6 +64,7 @@ class _TasksPageState extends State<TasksPage>
     followUpdateManager.addListener(update);
     historyRefreshManager.addListener(update);
     localLibraryRefreshManager.addListener(update);
+    localDownloadRecoveryManager.addListener(update);
     relatedSourceManager.addListener(update);
     sourceMigrationManager.addListener(update);
     comicSourceUpdateManager.addListener(update);
@@ -79,6 +82,7 @@ class _TasksPageState extends State<TasksPage>
     followUpdateManager.removeListener(update);
     historyRefreshManager.removeListener(update);
     localLibraryRefreshManager.removeListener(update);
+    localDownloadRecoveryManager.removeListener(update);
     relatedSourceManager.removeListener(update);
     sourceMigrationManager.removeListener(update);
     comicSourceUpdateManager.removeListener(update);
@@ -114,6 +118,7 @@ class _TasksPageState extends State<TasksPage>
               followUpdateManager.clearHistory();
               historyRefreshManager.clearHistory();
               localLibraryRefreshManager.clearHistory();
+              localDownloadRecoveryManager.clearHistory();
               relatedSourceManager.clearHistory();
               sourceMigrationManager.clearHistory();
               comicSourceUpdateManager.clearHistory();
@@ -142,6 +147,8 @@ class _TasksPageState extends State<TasksPage>
         historyRefreshManager.removeTask(id);
       case 'local_library_refresh':
         localLibraryRefreshManager.removeTask(id);
+      case 'local_download_recovery':
+        localDownloadRecoveryManager.removeTask(id);
       case 'related_source':
         relatedSourceManager.removeTask(id);
       case 'source_migration':
@@ -313,6 +320,17 @@ class _TasksPageState extends State<TasksPage>
           status: task.status.name,
           time: history ? task.finishedAt ?? task.createdAt : task.createdAt,
           builder: (_) => buildHistoryRefreshTaskCard(task, expanded: false),
+        ),
+      for (final task in history
+          ? localDownloadRecoveryManager.historyTasks
+          : localDownloadRecoveryManager.currentTasks)
+        TaskListEntry(
+          id: 'local_download_recovery:${task.id}',
+          title: task.currentTitle ?? '',
+          category: 'Restore local downloads',
+          status: task.status.name,
+          time: history ? task.finishedAt ?? task.createdAt : task.createdAt,
+          builder: (_) => buildLocalDownloadRecoveryTaskCard(task),
         ),
       for (final task
           in history
@@ -561,6 +579,7 @@ class _TasksPageState extends State<TasksPage>
         'follow_update' => Icons.sync,
         'history_refresh' => Icons.manage_history,
         'local_library_refresh' => Icons.refresh,
+        'local_download_recovery' => Icons.folder_open,
         'related_source' => Icons.hub_outlined,
         'source_migration' => Icons.move_up_outlined,
         'comic_source_update' => Icons.update,
@@ -584,6 +603,7 @@ class _TasksPageState extends State<TasksPage>
       'follow_update' => "Follow Update: @folder".tlParams(params),
       'history_refresh' => "History Refresh".tl,
       'local_library_refresh' => "Refresh Local Status".tl,
+      'local_download_recovery' => "Restore local downloads".tl,
       'related_source' => "Auto Link Sources: @folder".tlParams(params),
       'source_migration' => "Source Migration: @folder".tlParams(params),
       'comic_source_update' => "Update Sources".tl,
@@ -862,6 +882,50 @@ getTaskTitle('pre_translate', {'title': task.title}),
     );
 
     return _wrapHistoryCard(card, 'pre_translate', task.id, task.isRunning);
+  }
+
+  Widget buildLocalDownloadRecoveryTaskCard(LocalDownloadRecoveryTask task) {
+    final status = switch (task.status) {
+      LocalDownloadRecoveryStatus.running => task.cancelRequested
+          ? 'Canceling'.tl : task.phase.tl,
+      LocalDownloadRecoveryStatus.completed => 'Completed'.tl,
+      LocalDownloadRecoveryStatus.canceled => 'Canceled'.tl,
+      LocalDownloadRecoveryStatus.failed => 'Failed'.tl,
+    };
+    final card = Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 8),
+      child: _TaskExpansionTile(
+        initiallyExpanded: task.id == widget.initialExpandedTaskId,
+        leading: Icon(getTaskIcon('local_download_recovery', task.isRunning,
+            status: task.status.name)),
+        title: Text('Restore local downloads'.tl),
+        subtitle: buildTaskSubtitle(
+          [status, '${task.checked}/${task.total}'], task.createdAt, task.finishedAt,
+        ),
+        trailing: task.isRunning ? TextButton(
+          onPressed: task.cancelRequested ? null
+              : () => localDownloadRecoveryManager.cancel(task.id),
+          child: Text('Cancel'.tl),
+        ) : null,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: LinearProgressIndicator(
+              value: task.isRunning && task.total == 0 ? null : task.progress,
+            ),
+          ),
+          const SizedBox(height: 8),
+          buildSourceBox(title: 'Details'.tl, children: [
+            Text('Imported @a comics'.tlParams({'a': task.imported})),
+            if (task.currentTitle != null) Text(task.currentTitle!),
+            if (task.error != null)
+              Text(task.error!, style: TextStyle(color: context.colorScheme.error)),
+          ]),
+        ],
+      ),
+    );
+    return _wrapHistoryCard(card, 'local_download_recovery', task.id, task.isRunning);
   }
 
   Widget buildLocalLibraryRefreshTaskCard(
