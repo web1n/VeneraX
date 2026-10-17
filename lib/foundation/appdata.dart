@@ -384,7 +384,7 @@ class Settings with ChangeNotifier {
     'blockedCommentWords': [],
     'defaultSearchTarget': null,
     'autoPageTurningInterval': 5, // in seconds
-    'readerMode': 'galleryLeftToRight', // values of [ReaderMode]
+    'readerMode': 'continuousTopToBottom', // values of [ReaderMode]
     'enableContinuousChapterReading': true,
     'readerScreenPicNumberForLandscape': 1, // 1 - 5
     'readerScreenPicNumberForPortrait': 1, // 1 - 5
