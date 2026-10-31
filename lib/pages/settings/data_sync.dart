@@ -9,6 +9,21 @@ class DataSyncSettings extends StatefulWidget {
 }
 
 class _DataSyncSettingsState extends State<DataSyncSettings> {
+  Future<String> _preferDirectStoragePath(String selectedPath) async {
+    if (!App.isAndroid || !selectedPath.startsWith('android://')) {
+      return selectedPath;
+    }
+    try {
+      const channel = MethodChannel('venera/storage');
+      final path = await channel.invokeMethod<String>(
+        'resolveDirectDirectory', {'path': selectedPath},
+      );
+      return path == null || path.isEmpty ? selectedPath : path;
+    } catch (_) {
+      return selectedPath;
+    }
+  }
+
   String _importTaskMessage(ImportTask task) {
     if (task.phase == ImportPhase.extracting) {
       if (task.extractedBytes <= 0) return "Extracting".tl;
@@ -99,6 +114,12 @@ class _DataSyncSettingsState extends State<DataSyncSettings> {
                 },
               ),
             ),
+            if (App.isAndroid)
+              _SwitchSetting(
+                title: "Create .nomedia file".tl,
+                settingKey: 'createNoMedia',
+                subtitle: "When disabled, no new .nomedia files are created. Existing files are kept.".tl,
+              ),
             _CallbackSetting(
               title: "Set New Storage Path".tl,
               actionTitle: "Set".tl,
@@ -113,36 +134,38 @@ class _DataSyncSettingsState extends State<DataSyncSettings> {
                   result = await selectDirectory();
                 }
                 if (result == null) return;
-                Future<void> apply({bool allowNonEmpty = false}) async {
-                  var loadingDialog = showLoadingDialog(
+                if (result == LocalManager().path) return;
+                Future<void> apply() async {
+                  final loadingDialog = showLoadingDialog(
                     App.rootContext,
                     barrierDismissible: false,
                     allowCancel: false,
                   );
-                  var res = await LocalManager().setNewPath(
-                    result!,
-                    allowNonEmpty: allowNonEmpty,
-                  );
-                  loadingDialog.close();
-                  if (res == LocalManager.dirNotEmptySignal) {
-                    showConfirmDialog(
-                      context: App.rootContext,
-                      title: "Directory is not empty".tl,
-                      content:
-                          "The selected directory is not empty. Continue to merge local comics into it?"
-                              .tl,
-                      confirmText: "Continue".tl,
-                      onConfirm: () => apply(allowNonEmpty: true),
-                    );
-                  } else if (res != null) {
-                    context.showMessage(message: res);
+                  String? error;
+                  try {
+                    final path = await _preferDirectStoragePath(result!);
+                    error = await LocalManager().setNewPath(path);
+                  } finally {
+                    loadingDialog.close();
+                  }
+                  if (!mounted) return;
+                  if (error != null) {
+                    context.showMessage(message: error);
                   } else {
                     context.showMessage(message: "Path set successfully".tl);
                     setState(() {});
                   }
                 }
 
-                await apply();
+                await showConfirmDialog(
+                  context: App.rootContext,
+                  title: "Set New Storage Path".tl,
+                  content:
+                      "Existing files in the selected directory will be kept. No files will be moved or deleted. Comics stored in the old directory will no longer be accessible through the new storage path. Continue?"
+                          .tl,
+                  confirmText: "Continue".tl,
+                  onConfirm: apply,
+                );
               },
             ),
             ListTile(

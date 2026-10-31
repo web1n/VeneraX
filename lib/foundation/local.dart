@@ -14,6 +14,7 @@ import 'package:venera/foundation/download_keepalive.dart';
 import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/history.dart';
 import 'package:venera/foundation/log.dart';
+import 'package:venera/foundation/local_availability_store.dart';
 import 'package:venera/foundation/sqlite_connection.dart';
 import 'package:venera/network/download.dart';
 import 'package:venera/pages/reader/reader.dart';
@@ -129,6 +130,11 @@ class LocalComic with HistoryMixin implements Comic {
     return times;
   }
 
+  /// Fast classification for the library UI. Unknown is deliberately distinct
+  /// from missing: a synced manifest is not proof that this device has files.
+  LocalComicStatus get cachedStatus => LocalManager().cachedStatusOf(this);
+
+  /// Live validation for operations that need the actual files (e.g. export).
   LocalComicStatus get status {
     if (LocalManager().isDownloading(id, comicType)) {
       return LocalComicStatus.downloading;
@@ -295,50 +301,67 @@ class LocalManager with ChangeNotifier {
 
   late Database _db;
 
+  final availabilityStore = LocalAvailabilityStore();
+  final _availabilityVersions = <(String, int), int>{};
+  int availabilityGeneration = 0;
+
+  int availabilityVersion(String id, ComicType type) =>
+      _availabilityVersions[(id, type.value)] ?? 0;
+
+  void _touchAvailability(String id, ComicType type) {
+    final key = (id, type.value);
+    _availabilityVersions[key] = (_availabilityVersions[key] ?? 0) + 1;
+  }
+
+  LocalComicStatus cachedStatusOf(LocalComic comic) {
+    if (isDownloading(comic.id, comic.comicType)) {
+      return LocalComicStatus.downloading;
+    }
+    if (comic.directory.isEmpty) return LocalComicStatus.notDownloaded;
+    final available = availabilityStore.lookup(
+      comic.id, comic.comicType.value, comic.baseDir,
+    );
+    return switch (available) {
+      true => LocalComicStatus.downloaded,
+      false => LocalComicStatus.notDownloaded,
+      null => LocalComicStatus.unknown,
+    };
+  }
+
+  void markComicAvailability(String id, ComicType type, bool available) {
+    _touchAvailability(id, type);
+    final comic = find(id, type);
+    if (comic != null) {
+      availabilityStore.set(id, type.value, comic.baseDir, available);
+    }
+    notifyListeners();
+  }
+
+  /// Publish a throttled batch of verified file states to mounted views.
+  void publishAvailabilityChanges() => notifyListeners();
+
   /// path to the directory where all the comics are stored
   late String path;
 
   Directory get directory => Directory(path);
 
-  void _checkNoMedia() {
-    if (App.isAndroid) {
-      var file = File(FilePath.join(path, '.nomedia'));
+  void _checkNoMedia([String? storagePath]) {
+    if (App.isAndroid && appdata.settings['createNoMedia'] == true) {
+      var file = File(FilePath.join(storagePath ?? path, '.nomedia'));
       if (!file.existsSync()) {
         file.createSync();
       }
     }
   }
 
-  /// Sentinel returned by [setNewPath] when the chosen directory is not empty
-  /// and the caller has not opted in to merging. Callers should compare the
-  /// return value against this constant (not show it as an error) to decide
-  /// whether to ask the user for confirmation.
-  static const dirNotEmptySignal = "__venera_dir_not_empty__";
-
-  // return error message if failed, [dirNotEmptySignal] if the target is not
-  // empty and [allowNonEmpty] is false.
-  Future<String?> setNewPath(String newPath, {bool allowNonEmpty = false}) async {
-    var newDir = Directory(newPath);
-    if (!await newDir.exists()) {
-      return "Directory does not exist";
-    }
-    if (!allowNonEmpty && !await newDir.list().isEmpty) {
-      // Don't hard-fail: let the caller confirm merging into a non-empty
-      // directory (e.g. an existing folder on an SD card). Returning a sentinel
-      // keeps the "must be empty" safety while giving the user a way forward.
-      return dirNotEmptySignal;
-    }
-    final oldDir = directory;
+  /// Switch storage without moving or deleting files in either directory.
+  Future<String?> setNewPath(String newPath) async {
+    if (newPath == path) return null;
     try {
-      await copyDirectoryIsolate(oldDir, newDir);
-      // Verify the copy looks complete before destroying the source. SAF
-      // targets can fail silently; deleting the source after an incomplete
-      // copy would lose data. We only abort when we can positively confirm the
-      // destination has fewer files than the source — if the count itself
-      // throws (slow/unsupported on some SAF impls), we trust the copy.
-      if (!await _verifyCopied(oldDir, newDir)) {
-        return "Failed to copy all files to the new location";
+      if (!await Directory(newPath).exists()) {
+        return "Directory does not exist";
       }
+      _checkNoMedia(newPath);
       await File(
         FilePath.join(App.dataPath, 'local_path'),
       ).writeAsString(newPath);
@@ -346,37 +369,12 @@ class LocalManager with ChangeNotifier {
       Log.error("IO", e, s);
       return e.toString();
     }
-    // The data now lives at [newPath]; clearing the old directory is
-    // best-effort. A failure here must not roll back the switch, so swallow it.
-    try {
-      await oldDir.deleteContents(recursive: true);
-    } catch (e, s) {
-      Log.error("IO", "Failed to clean old storage path: $e", s);
-    }
     path = newPath;
-    _checkNoMedia();
+    // Retire scans of the previous path. Cached availability is already keyed
+    // by base directory, so old results cannot classify the new location.
+    availabilityGeneration++;
+    notifyListeners();
     return null;
-  }
-
-  /// Best-effort completeness check: returns false only when the destination is
-  /// confirmed to contain fewer files than the source. Any error while counting
-  /// is treated as "cannot disprove" and returns true so a valid copy is not
-  /// rejected on platforms where recursive listing is unreliable.
-  Future<bool> _verifyCopied(Directory source, Directory dest) async {
-    try {
-      int countFiles(Directory d) {
-        if (!d.existsSync()) return 0;
-        return d.listSync(recursive: true).whereType<File>().length;
-      }
-
-      final srcCount = countFiles(source);
-      final dstCount = countFiles(dest);
-      if (srcCount == 0) return true;
-      return dstCount >= srcCount;
-    } catch (e, s) {
-      Log.error("IO", "Copy verification skipped: $e", s);
-      return true;
-    }
   }
 
   Future<String> findDefaultPath() async {
@@ -423,6 +421,8 @@ class LocalManager with ChangeNotifier {
     if (!isInitialized) return;
     isInitialized = false;
     DatabaseGateway.instance.closeManaged(_dbPath);
+    availabilityGeneration++;
+    availabilityStore.close();
   }
 
   Future<void> init() async {
@@ -445,6 +445,7 @@ class LocalManager with ChangeNotifier {
     }
     _checkPathValidation();
     _checkNoMedia();
+    availabilityStore.init(App.dataPath);
     isInitialized = true;
     await ComicSourceManager().ensureInit();
     restoreDownloadingTasks();
@@ -494,6 +495,7 @@ class LocalManager with ChangeNotifier {
     if (!isInitialized) {
       throw StateError("LocalManager is not initialized; cannot restore");
     }
+    availabilityGeneration++;
     DatabaseGateway.instance.closeManaged(_dbPath);
     try {
       restoreDatabaseFiles({_dbPath: sourcePath});
@@ -536,7 +538,70 @@ class LocalManager with ChangeNotifier {
     return (now > maxId ? now : maxId + 1).toString();
   }
 
-  Future<void> add(LocalComic comic, [String? id]) async {
+  Future<void> add(LocalComic comic, [String? id, bool? filesAvailable]) async {
+    _addComic(comic, id, filesAvailable);
+    notifyListeners();
+  }
+
+  /// Recover scanned files without rebuilding every mounted library once per
+  /// comic. Transactions stay synchronous; small batches yield between writes
+  /// so progress and cancellation remain responsive during large recoveries.
+  Future<int> registerRecoveredComics(
+    List<LocalComic> comics, {
+    required bool Function() shouldCancel,
+    void Function(int checked, int total, int imported)? onProgress,
+  }) async {
+    var imported = 0;
+    try {
+      for (var offset = 0; offset < comics.length; offset += 5) {
+        if (shouldCancel()) break;
+        // Other imports may have run during the preceding event-loop yield.
+        var nextId = int.parse(findValidId(ComicType.local));
+        final end = offset + 5 < comics.length ? offset + 5 : comics.length;
+        _db.execute('BEGIN TRANSACTION;');
+        var localCommitted = false;
+        try {
+          availabilityStore.batch(() {
+            for (var i = offset; i < end; i++) {
+              final comic = comics[i];
+              final exists = _db.select(
+                'SELECT 1 FROM comics WHERE title = ? OR directory IN (?, ?) LIMIT 1;',
+                [comic.title, comic.title, comic.directory],
+              );
+              if (exists.isNotEmpty) continue;
+              final recovered = LocalComic(
+                id: '${nextId++}',
+                title: comic.title,
+                subtitle: comic.subtitle,
+                tags: comic.tags,
+                directory: comic.directory,
+                chapters: comic.chapters,
+                cover: comic.cover,
+                comicType: ComicType.local,
+                downloadedChapters: comic.downloadedChapters,
+                createdAt: comic.createdAt,
+                description: comic.description,
+              );
+              _addComic(recovered, null, true);
+              imported++;
+            }
+            _db.execute('COMMIT;');
+            localCommitted = true;
+          });
+        } catch (_) {
+          if (!localCommitted) _db.execute('ROLLBACK;');
+          rethrow;
+        }
+        onProgress?.call(end, comics.length, imported);
+        await Future<void>.delayed(Duration.zero);
+      }
+    } finally {
+      if (imported > 0 && isInitialized) notifyListeners();
+    }
+    return imported;
+  }
+
+  void _addComic(LocalComic comic, String? id, bool? filesAvailable) {
     final storedId = id ?? comic.id;
     var old = find(storedId, comic.comicType);
     var downloaded = List<String>.from(comic.downloadedChapters);
@@ -544,6 +609,14 @@ class LocalManager with ChangeNotifier {
       downloaded.addAll(old.downloadedChapters);
     }
     _writeComic(comic, storedId, downloaded);
+    _touchAvailability(storedId, comic.comicType);
+    if (old == null) {
+      availabilityStore.remove(storedId, comic.comicType.value);
+    }
+    if (filesAvailable != null) {
+      availabilityStore.set(storedId, comic.comicType.value,
+          comic.baseDir, filesAvailable);
+    }
     try {
       // Importers pass the real id separately from a placeholder on [comic];
       // mirroring the placeholder would write another comic's domain row.
@@ -565,7 +638,6 @@ class LocalManager with ChangeNotifier {
               ),
       );
     } catch (_) {}
-    notifyListeners();
   }
 
   void _writeComic(
@@ -603,6 +675,10 @@ class LocalManager with ChangeNotifier {
       remapLocalComicHistory(existingHistory, previous, comic);
     }
     _writeComic(comic, comic.id, List<String>.from(comic.downloadedChapters));
+    // A successful rescan has already verified this local directory.
+    _touchAvailability(comic.id, comic.comicType);
+    availabilityStore.set(comic.id, comic.comicType.value, comic.baseDir,
+        !comic.hasChapters || comic.downloadedChapters.isNotEmpty);
     try {
       const ComicStateRepository().mirrorLocalComic(comic);
     } catch (_) {}
@@ -639,6 +715,8 @@ class LocalManager with ChangeNotifier {
       id,
       comicType.value,
     ]);
+    _touchAvailability(id, comicType);
+    availabilityStore.remove(id, comicType.value);
     notifyListeners();
   }
 
@@ -873,7 +951,7 @@ class LocalManager with ChangeNotifier {
 
   void completeTask(DownloadTask task) {
     final finishedTitle = task.title;
-    add(task.toLocalComic());
+    _addComic(task.toLocalComic(), null, true);
     downloadingTasks.remove(task);
     notifyListeners();
     saveCurrentDownloadingTasks();
@@ -908,6 +986,76 @@ class LocalManager with ChangeNotifier {
       }
       DownloadKeepAlive.instance.refresh();
     }
+  }
+
+  /// Scheduled body images count as started even before progress is saved.
+  bool canRefreshUnstartedDownload(ImagesDownloadTask task) {
+    final state = task.toJson();
+    return (state['downloadedCount'] as num? ?? 0) == 0 &&
+        (state['index'] as num? ?? 0) == 0 &&
+        (state['chapter'] as num? ?? 0) == 0 && task.tasks.isEmpty;
+  }
+
+  /// Rebuild only an untouched, paused task using chapters found on disk.
+  /// Removing a fully restored task does not invoke cancel/delete cleanup.
+  int refreshUnstartedDownload(
+    ImagesDownloadTask task, {
+    required String storagePath,
+    required ComicDetails details,
+    required List<String> foundChapters,
+    String? bodyImage,
+  }) {
+    final index = downloadingTasks.indexWhere((item) => identical(item, task));
+    if (index < 0 || !task.isPaused || !task.userPaused ||
+        !canRefreshUnstartedDownload(task)) return 0;
+    final selected = details.chapters == null
+        ? <String>['']
+        : details.chapters!.ids
+            .where((id) => task.chapters == null || task.chapters!.contains(id))
+            .toList();
+    final found = foundChapters.toSet();
+    final matched = selected.where(found.contains).toList();
+    if (matched.isEmpty) return 0;
+    final remaining = selected.where((id) => !found.contains(id)).toList();
+    final replacement = remaining.isEmpty ? null : ImagesDownloadTask.fromJson({
+      ...task.toJson(),
+      'comic': {...details.toJson(), 'subtitle': details.subTitle},
+      'chapters': remaining,
+      'path': storagePath,
+      // The downloader stores its cover at the root. A discovered chapter
+      // image is suitable for the local record, but not its cover marker.
+      'cover': null,
+      'images': null,
+      'downloadedCount': 0,
+      'totalCount': 0,
+      'totalChapters': 0,
+      'index': 0,
+      'chapter': 0,
+      'wasRunning': false,
+      'userPaused': true,
+    });
+    _addComic(LocalComic(
+      id: task.id,
+      title: details.title,
+      subtitle: details.subTitle ?? '',
+      tags: details.tags.entries.expand((entry) =>
+          entry.value.map((value) => '${entry.key}:$value')).toList(),
+      directory: storagePath,
+      chapters: details.chapters,
+      cover: bodyImage ?? '',
+      comicType: task.comicType,
+      downloadedChapters: details.chapters == null ? [] : matched,
+      createdAt: DateTime.now(),
+      description: details.description ?? '',
+    ), null, true);
+    if (replacement == null) {
+      downloadingTasks.removeAt(index);
+    } else {
+      downloadingTasks[index] = replacement;
+    }
+    scheduleSaveDownloadingTasks();
+    notifyListeners();
+    return matched.length;
   }
 
   /// User-initiated pause of a single task. Marks it [DownloadTask.userPaused]
@@ -1262,11 +1410,14 @@ class LocalManager with ChangeNotifier {
         'UPDATE comics SET downloadedChapters = ? WHERE id = ? AND comic_type = ?;',
         [jsonEncode(newDownloadedChapters), c.id, c.comicType.value],
       );
+      _touchAvailability(c.id, c.comicType);
     } else {
       _db.execute('DELETE FROM comics WHERE id = ? AND comic_type = ?;', [
         c.id,
         c.comicType.value,
       ]);
+      _touchAvailability(c.id, c.comicType);
+      availabilityStore.remove(c.id, c.comicType.value);
       if (c.comicType == ComicType.local) {
         const ComicStateRepository().removeLocalComicMirror(c.id);
       }
@@ -1316,6 +1467,13 @@ class LocalManager with ChangeNotifier {
       return;
     }
     _db.execute('COMMIT;');
+
+    availabilityStore.batch(() {
+      for (final comic in comics) {
+        _touchAvailability(comic.id, comic.comicType);
+        availabilityStore.remove(comic.id, comic.comicType.value);
+      }
+    });
 
     var comicIDs = comics.map((e) => ComicID(e.comicType, e.id)).toList();
 
@@ -1417,4 +1575,5 @@ enum LocalComicStatus {
   downloaded,
   downloading,
   notDownloaded,
+  unknown,
 }

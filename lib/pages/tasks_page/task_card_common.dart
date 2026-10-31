@@ -123,6 +123,8 @@ mixin _TaskCardCommon on State<TasksPage> {
       return switch (taskType) {
         'follow_update' => Icons.sync,
         'history_refresh' => Icons.manage_history,
+        'local_library_refresh' => Icons.refresh,
+        'local_download_recovery' => Icons.folder_open,
         'related_source' => Icons.hub_outlined,
         'source_migration' => Icons.move_up_outlined,
         'comic_source_update' => Icons.update,
@@ -145,6 +147,8 @@ mixin _TaskCardCommon on State<TasksPage> {
     return switch (taskType) {
       'follow_update' => "Follow Update: @folder".tlParams(params),
       'history_refresh' => "History Refresh".tl,
+      'local_library_refresh' => "Refresh Local Status".tl,
+      'local_download_recovery' => "Restore local downloads".tl,
       'related_source' => "Auto Link Sources: @folder".tlParams(params),
       'source_migration' => "Source Migration: @folder".tlParams(params),
       'comic_source_update' => "Update Sources".tl,

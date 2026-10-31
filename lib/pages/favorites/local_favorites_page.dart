@@ -831,6 +831,11 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage>
                     onClick: downloadSelected,
                   ),
                   MenuEntry(
+                    icon: Icons.playlist_add,
+                    text: "Download selected (add tasks only)".tl,
+                    onClick: () => downloadSelected(addTasksOnly: true),
+                  ),
+                  MenuEntry(
                     icon: Icons.move_up_outlined,
                     text: "Migrate Source".tl,
                     onClick: () {

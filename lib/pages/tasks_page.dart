@@ -10,6 +10,8 @@ import 'package:venera/foundation/export_tasks.dart';
 import 'package:venera/foundation/follow_update_tasks.dart';
 import 'package:venera/foundation/import_tasks.dart';
 import 'package:venera/foundation/history_tasks.dart';
+import 'package:venera/foundation/local_library_refresh_tasks.dart';
+import 'package:venera/foundation/local_download_recovery_tasks.dart';
 import 'package:venera/foundation/image_translation/translation_models.dart';
 import 'package:venera/foundation/image_translation/pre_translation_tasks.dart';
 import 'package:venera/foundation/image_translation/translation_types.dart';
@@ -26,6 +28,8 @@ part 'tasks_page/model_download_task_card.dart';
 part 'tasks_page/follow_update_task_card.dart';
 part 'tasks_page/pre_translation_task_card.dart';
 part 'tasks_page/history_refresh_task_card.dart';
+part 'tasks_page/local_library_refresh_task_card.dart';
+part 'tasks_page/local_download_recovery_task_card.dart';
 part 'tasks_page/related_source_task_card.dart';
 part 'tasks_page/source_migration_task_card.dart';
 part 'tasks_page/comic_source_update_task_card.dart';
@@ -53,6 +57,8 @@ class _TasksPageState extends State<TasksPage>
         _FollowUpdateTaskCard,
         _PreTranslationTaskCard,
         _HistoryRefreshTaskCard,
+        _LocalLibraryRefreshTaskCard,
+        _LocalDownloadRecoveryTaskCard,
         _RelatedSourceTaskCard,
         _SourceMigrationTaskCard,
         _ComicSourceUpdateTaskCard,
@@ -64,6 +70,10 @@ class _TasksPageState extends State<TasksPage>
   final followUpdateManager = FollowUpdateTaskManager.instance;
   @override
   final historyRefreshManager = HistoryRefreshTaskManager.instance;
+  @override
+  final localLibraryRefreshManager = LocalLibraryRefreshTaskManager.instance;
+  @override
+  final localDownloadRecoveryManager = LocalDownloadRecoveryTaskManager.instance;
   @override
   final relatedSourceManager = RelatedSourceTaskManager.instance;
   @override
@@ -93,6 +103,8 @@ class _TasksPageState extends State<TasksPage>
     });
     followUpdateManager.addListener(update);
     historyRefreshManager.addListener(update);
+    localLibraryRefreshManager.addListener(update);
+    localDownloadRecoveryManager.addListener(update);
     relatedSourceManager.addListener(update);
     sourceMigrationManager.addListener(update);
     comicSourceUpdateManager.addListener(update);
@@ -109,6 +121,8 @@ class _TasksPageState extends State<TasksPage>
     _tabController.dispose();
     followUpdateManager.removeListener(update);
     historyRefreshManager.removeListener(update);
+    localLibraryRefreshManager.removeListener(update);
+    localDownloadRecoveryManager.removeListener(update);
     relatedSourceManager.removeListener(update);
     sourceMigrationManager.removeListener(update);
     comicSourceUpdateManager.removeListener(update);
@@ -143,6 +157,8 @@ class _TasksPageState extends State<TasksPage>
               dataSyncManager.clearHistory();
               followUpdateManager.clearHistory();
               historyRefreshManager.clearHistory();
+              localLibraryRefreshManager.clearHistory();
+              localDownloadRecoveryManager.clearHistory();
               relatedSourceManager.clearHistory();
               sourceMigrationManager.clearHistory();
               comicSourceUpdateManager.clearHistory();
@@ -170,6 +186,10 @@ class _TasksPageState extends State<TasksPage>
         followUpdateManager.removeTask(id);
       case 'history_refresh':
         historyRefreshManager.removeTask(id);
+      case 'local_library_refresh':
+        localLibraryRefreshManager.removeTask(id);
+      case 'local_download_recovery':
+        localDownloadRecoveryManager.removeTask(id);
       case 'related_source':
         relatedSourceManager.removeTask(id);
       case 'source_migration':
@@ -307,6 +327,32 @@ class _TasksPageState extends State<TasksPage>
           status: task.status.name,
           time: history ? task.finishedAt ?? task.createdAt : task.createdAt,
           builder: (_) => buildHistoryRefreshTaskCard(task, expanded: false),
+        ),
+      for (final task in history
+          ? localDownloadRecoveryManager.historyTasks
+          : localDownloadRecoveryManager.currentTasks)
+        TaskListEntry(
+          id: 'local_download_recovery:${task.id}',
+          title: task.currentTitle ?? '',
+          category: 'Restore local downloads',
+          status: task.status.name,
+          time: history ? task.finishedAt ?? task.createdAt : task.createdAt,
+          builder: (_) => buildLocalDownloadRecoveryTaskCard(task),
+        ),
+      for (final task
+          in history
+              ? localLibraryRefreshManager.historyTasks
+              : localLibraryRefreshManager.currentTasks)
+        TaskListEntry(
+          id: 'local_library_refresh:${task.id}',
+          title: task.currentTitle ?? '',
+          category: 'Refresh Local Status',
+          status: task.status.name,
+          time: history ? task.finishedAt ?? task.createdAt : task.createdAt,
+          builder: (_) => buildLocalLibraryRefreshTaskCard(
+            task,
+            expanded: !history && task.id == widget.initialExpandedTaskId,
+          ),
         ),
       for (final task
           in history

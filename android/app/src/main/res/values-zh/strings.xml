@@ -15,4 +15,5 @@
     <string name="background_title_webdav_migration">正在遷移到 WebDAV</string>
     <string name="download_done_channel_name">下載完成</string>
     <string name="download_done_default">下載完成</string>
+    <string name="background_title_local_library_refresh">正在重新整理本機狀態</string>
 </resources>

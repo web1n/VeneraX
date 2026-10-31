@@ -385,6 +385,9 @@ Future<int> importVeneraComics(
         }
       }
 
+      if (entry.hasImages) {
+        LocalManager().markComicAvailability(comic.id, comic.comicType, true);
+      }
       imported++;
       onProgress?.call(i + 1, total);
     }

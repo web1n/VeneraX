@@ -46,6 +46,8 @@ class BackgroundKeepAlive {
   static const tagSync = 'sync';
   static const tagPreTranslate = 'pre_translate';
   static const tagWebdavMigration = 'webdav_migration';
+  static const tagLocalLibraryRefresh = 'local_library_refresh';
+  static const tagLocalDownloadRecovery = 'local_download_recovery';
 
   bool get _supported => App.isAndroid;
 

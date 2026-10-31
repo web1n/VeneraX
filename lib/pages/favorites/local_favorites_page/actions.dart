@@ -46,8 +46,8 @@ mixin _LocalFavoritesActions on SelectionMixin<_LocalFavoritesPage, Comic> {
     return false;
   }
 
-  void downloadSelected() async {
-    if (!await ensureDownloadStorageWritable()) return;
+  void downloadSelected({bool addTasksOnly = false}) async {
+    if (!addTasksOnly && !await ensureDownloadStorageWritable()) return;
     // Build the tasks first, then enqueue them in one batch so the queue is
     // persisted a single time instead of once per comic (#17).
     var tasks = <DownloadTask>[];
@@ -63,7 +63,7 @@ mixin _LocalFavoritesActions on SelectionMixin<_LocalFavoritesPage, Comic> {
           comicId: fav.id,
           comicTitle: fav.title,
           comicCover: fav.cover,
-        ),
+        )..userPaused = addTasksOnly,
       );
     }
     if (tasks.isNotEmpty) {

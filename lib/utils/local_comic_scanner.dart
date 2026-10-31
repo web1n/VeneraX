@@ -1,3 +1,6 @@
+import 'dart:isolate';
+
+import 'package:flutter_saf/flutter_saf.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/local.dart';
@@ -6,6 +9,111 @@ import 'package:venera/utils/comic_metadata_resolver.dart';
 import 'package:venera/utils/io.dart';
 
 const _localComicImageExtensions = {'jpg', 'jpeg', 'png', 'webp', 'gif', 'jpe'};
+
+/// Owns a single recovery scan. Only directory discovery/metadata parsing run
+/// here; application databases remain on their existing owning isolate.
+class LocalDownloadRecoveryScan {
+  Isolate? _worker;
+  SendPort? _cancelPort;
+  bool _canceled = false;
+
+  void cancel() {
+    _canceled = true;
+    _cancelPort?.send(true);
+  }
+
+  Future<List<LocalComic>> scan(
+    String path,
+    Set<String> knownNames,
+    Set<String> knownPaths, {
+    required void Function(int checked, int total) onProgress,
+  }) async {
+    final port = ReceivePort();
+    final comics = <LocalComic>[];
+    var finished = false;
+    try {
+      final worker = await Isolate.spawn(
+        _scanRecoverableDownloads,
+        (port.sendPort, path, knownNames, knownPaths),
+        onError: port.sendPort,
+        onExit: port.sendPort,
+        errorsAreFatal: true,
+      );
+      _worker = worker;
+      await for (final message in port) {
+        if (message == null) break;
+        if (message is List) throw StateError(message.first.toString());
+        final result = message as Map;
+        if (result['control'] case final SendPort control) {
+          _cancelPort = control;
+          if (_canceled) control.send(true);
+          continue;
+        }
+        if (result['done'] == true) {
+          finished = true;
+          break;
+        }
+        if (_canceled) continue;
+        if (result['comic'] case final LocalComic comic) comics.add(comic);
+        onProgress(result['checked'] as int, result['total'] as int);
+      }
+      if (!finished && !_canceled) {
+        throw StateError('Local download recovery scan stopped unexpectedly');
+      }
+      return comics;
+    } finally {
+      _worker?.kill(priority: Isolate.immediate);
+      port.close();
+      _worker = null;
+      _cancelPort = null;
+    }
+  }
+}
+
+Future<void> _scanRecoverableDownloads(
+  (SendPort, String, Set<String>, Set<String>) request,
+) async {
+  final (port, path, knownNames, knownPaths) = request;
+  final control = ReceivePort();
+  var canceled = false;
+  control.listen((_) => canceled = true);
+  port.send({'control': control.sendPort});
+  final saf = Platform.isAndroid ? SAFTaskWorker() : null;
+  try {
+    if (saf != null) await saf.init();
+    await overrideIO(() async {
+      final directories = (await Directory(path).list().toList())
+          .whereType<Directory>().toList();
+      var checked = 0;
+      for (final directory in directories) {
+        if (canceled) break;
+        LocalComic? comic;
+        if (!knownPaths.contains(directory.path)) {
+          var createTime = DateTime.now();
+          try {
+            createTime = (await directory.stat()).modified;
+          } on UnimplementedError {
+            // Android SAF directories do not expose file timestamps.
+          }
+          comic = await scanLocalComicDirectory(
+            directory,
+            createTime: createTime,
+            useRelativePath: true,
+            rejectExisting: false,
+          );
+          if (comic != null && knownNames.contains(comic.title)) comic = null;
+        }
+        checked++;
+        port.send({'comic': comic, 'checked': checked, 'total': directories.length});
+      }
+    });
+  } finally {
+    saf?.dispose();
+    control.close();
+  }
+  // Signal completion after disposing the SAF child worker, including cancel.
+  port.send({'done': true});
+}
 
 bool _isLocalComicImage(File file) {
   final name = file.name.toLowerCase();
